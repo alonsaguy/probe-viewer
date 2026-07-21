@@ -25,12 +25,15 @@
 #define __PROBEVIEWEREDITOR_H__
 
 #include "VisualizerEditorHeaders.h"
+#include "Localization/LocalizationPanel.hpp"
+#include "Localization/LocalizationResult.hpp"
 
 namespace ProbeViewer
 {
 
 class ProbeViewerEditor
-    : public VisualizerEditor
+    : public VisualizerEditor,
+      private Timer
 {
 public:
     /** Constructor */
@@ -49,16 +52,26 @@ public:
      */
     virtual Visualizer* createNewCanvas() override;
 
-    /** Updates available streams*/
+    /** Updates available streams */
     void updateSettings() override;
 
     /** Sets custom regions by electrode index */
-    void setRegions (String streamKey, Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours);
+    void setRegions (String streamKey,
+                     Array<int>& electrodeInds,
+                     Array<String>& regionNames,
+                     Array<Colour>& regionColours);
 
 private:
+    /** Polls for newly completed worker results on the GUI thread and sends
+        their per-channel regions to ProbeViewerCanvas::setRegions(). */
+    void timerCallback() override;
+
     class ProbeViewerNode* probeViewerProcessor;
 
     std::unique_ptr<Label> streamSampleRateLabel;
+    std::unique_ptr<Localization::LocalizationPanel> localizationPanel;
+
+    Localization::LocalizationResultPtr displayedLocalizationResult;
 
     bool hasNoInputs;
 

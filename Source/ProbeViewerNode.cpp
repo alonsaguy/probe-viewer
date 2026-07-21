@@ -26,16 +26,25 @@
 #include "ProbeViewerCanvas.h"
 #include "ProbeViewerEditor.h"
 
+#include <vector>
+
 using namespace ProbeViewer;
 
 ProbeViewerNode::ProbeViewerNode()
     : GenericProcessor ("Probe Viewer")
 {
     streamToDraw = String();
+    lastChannelInStream = -1;
+
+    localizationWorker = std::make_unique<Localization::LocalizationWorker>();
+    localizationAccumulator = std::make_unique<Localization::LocalizationWindowAccumulator>();
 }
 
 ProbeViewerNode::~ProbeViewerNode()
 {
+    // Destroying the worker joins its background thread.
+    localizationAccumulator.reset();
+    localizationWorker.reset();
 }
 
 void ProbeViewerNode::registerParameters()
@@ -57,11 +66,48 @@ void ProbeViewerNode::process (AudioBuffer<float>& buffer)
         String streamKey = stream->getKey();
         uint16 streamId = stream->getStreamId();
         CircularBuffer* streamBuffer = dataBufferMap[streamKey];
+
+        const int numSamples = getNumSamplesInBlock (streamId);
+        std::vector<int> globalChannelIndices;
+        globalChannelIndices.reserve (static_cast<size_t> (stream->getChannelCount()));
+
         for (int localId = 0; localId < stream->getChannelCount(); localId++)
         {
             int globalId = stream->getContinuousChannels()[localId]->getGlobalIndex();
-            streamBuffer->addData (buffer, localId, globalId, getNumSamplesInBlock (streamId), getFirstSampleNumberForBlock (streamId));
+            globalChannelIndices.push_back (globalId);
+
+            if (streamBuffer != nullptr)
+            {
+                streamBuffer->addData (buffer,
+                                       localId,
+                                       globalId,
+                                       numSamples,
+                                       getFirstSampleNumberForBlock (streamId));
+            }
         }
+
+        // This is the only localization-related work done on the acquisition
+        // thread: copy samples into the preallocated accumulator and update
+        // its bookkeeping. Feature extraction and localization happen later
+        // on LocalizationWorker's background thread.
+        if (localizationAccumulator != nullptr
+            && localizationAccumulator->isArmed()
+            && streamKey == streamToDraw)
+        {
+            localizationAccumulator->addBlock (buffer,
+                                                globalChannelIndices,
+                                                numSamples);
+        }
+    }
+
+    // Moving a completed input into the worker is lightweight and immediate.
+    if (localizationAccumulator != nullptr
+        && localizationWorker != nullptr
+        && localizationAccumulator->isWindowReady()
+        && localizationWorker->canAcceptJob())
+    {
+        localizationWorker->submitWindow (localizationAccumulator->makeInput(),
+                                          localizationConfig);
     }
 
     checkForEvents();
@@ -151,6 +197,11 @@ bool ProbeViewerNode::stopAcquisition()
 
 void ProbeViewerNode::setDisplayedStream (const String& streamKey)
 {
+    // A partially collected window belongs to the old stream and must not be
+    // continued after switching the displayed/localized stream.
+    if (streamToDraw != streamKey && localizationAccumulator != nullptr)
+        localizationAccumulator->reset();
+
     streamToDraw = streamKey;
     ((ProbeViewerEditor*) getEditor())->displayStreamChanged();
 }
@@ -182,6 +233,111 @@ CircularBuffer* ProbeViewerNode::getCircularBufferPtr()
         return dataBufferMap[streamToDraw];
     else
         return nullptr;
+}
+
+void ProbeViewerNode::setLocalizationEnabled (bool enabled)
+{
+    localizationConfig.enabled = enabled;
+
+    if (! enabled && localizationAccumulator != nullptr)
+        localizationAccumulator->reset();
+}
+
+void ProbeViewerNode::setLocalizationWindowSeconds (double seconds)
+{
+    localizationConfig.windowSeconds = jlimit (1.0, 300.0, seconds);
+}
+
+void ProbeViewerNode::setLocalizationFeatureSource (Localization::FeatureSource source)
+{
+    localizationConfig.featureSource = source;
+}
+
+void ProbeViewerNode::setLocalizationModelName (const String& modelName)
+{
+    localizationConfig.modelName = modelName;
+}
+
+void ProbeViewerNode::requestLocalization()
+{
+    if (! localizationConfig.enabled)
+    {
+        LOGD ("Probe Viewer localization request ignored: localization is disabled.");
+        return;
+    }
+
+    if (streamToDraw.isEmpty())
+    {
+        LOGD ("Probe Viewer localization request ignored: no display stream selected.");
+        return;
+    }
+
+    auto* stream = getDataStream (streamToDraw);
+
+    if (stream == nullptr)
+    {
+        LOGD ("Probe Viewer localization request ignored: selected stream is unavailable.");
+        return;
+    }
+
+    if (localizationWorker == nullptr || ! localizationWorker->canAcceptJob())
+    {
+        LOGD ("Probe Viewer localization request ignored: worker is busy.");
+        return;
+    }
+
+    localizationAccumulator->arm (streamToDraw,
+                                  stream->getSampleRate(),
+                                  stream->getChannelCount(),
+                                  localizationConfig.windowSeconds);
+
+    LOGD ("Probe Viewer localization armed for stream ", streamToDraw,
+          " using a ", localizationConfig.windowSeconds, " second window.");
+}
+
+void ProbeViewerNode::resetLocalization()
+{
+    if (localizationAccumulator != nullptr)
+        localizationAccumulator->reset();
+
+    if (localizationWorker != nullptr)
+        localizationWorker->reset();
+}
+
+Localization::LocalizationResultPtr ProbeViewerNode::getLatestLocalizationResult() const
+{
+    if (localizationWorker != nullptr)
+        return localizationWorker->getLatestResult();
+
+    return {};
+}
+
+String ProbeViewerNode::getLocalizationStatus() const
+{
+    if (! localizationConfig.enabled)
+        return "Disabled";
+
+    if (localizationAccumulator != nullptr)
+    {
+        if (localizationAccumulator->isWindowReady())
+            return "Window ready";
+
+        if (localizationAccumulator->isArmed())
+            return "Collecting";
+    }
+
+    if (localizationWorker != nullptr)
+        return localizationWorker->getStatus();
+
+    return "Unavailable";
+}
+
+float ProbeViewerNode::getLocalizationProgress() const
+{
+    if (localizationAccumulator != nullptr)
+        return localizationAccumulator->progress();
+
+    return 0.0f;
 }
 
 String ProbeViewerNode::handleConfigMessage (const String& msg)

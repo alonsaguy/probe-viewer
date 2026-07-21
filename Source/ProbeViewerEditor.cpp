@@ -34,7 +34,11 @@ ProbeViewerEditor::ProbeViewerEditor (GenericProcessor* parentNode)
 {
     probeViewerProcessor = (ProbeViewerNode*) parentNode;
 
-    desiredWidth = 175;
+    // Keep the existing stream controls on the left and place localization
+    // controls in a new section to their right. This avoids relying on extra
+    // vertical editor space, which is limited in the Open Ephys signal chain.
+    desiredWidth = 430;
+
     addSelectedStreamParameterEditor (Parameter::PROCESSOR_SCOPE, "display_stream", 15, 30);
     auto* streamEditor = getParameterEditor ("display_stream");
     streamEditor->setLayout (ParameterEditor::nameOnTop);
@@ -44,10 +48,19 @@ ProbeViewerEditor::ProbeViewerEditor (GenericProcessor* parentNode)
     streamSampleRateLabel->setFont (FontOptions ("Inter", "Medium", 14.0f));
     streamSampleRateLabel->setBounds (15, 90, 140, 24);
     addAndMakeVisible (streamSampleRateLabel.get());
+
+    localizationPanel = std::make_unique<Localization::LocalizationPanel> (*probeViewerProcessor);
+    localizationPanel->setBounds (170, 8, 250, 138);
+    addAndMakeVisible (localizationPanel.get());
+
+    // Poll only on the GUI thread. The worker never directly touches canvas
+    // objects or JUCE components.
+    startTimerHz (5);
 }
 
 ProbeViewerEditor::~ProbeViewerEditor()
 {
+    stopTimer();
 }
 
 Visualizer* ProbeViewerEditor::createNewCanvas()
@@ -83,10 +96,50 @@ void ProbeViewerEditor::displayStreamChanged()
 }
 
 /** Sets custom depths and regions */
-void ProbeViewerEditor::setRegions (String streamKey, Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours)
+void ProbeViewerEditor::setRegions (String streamKey,
+                                    Array<int>& electrodeInds,
+                                    Array<String>& regionNames,
+                                    Array<Colour>& regionColours)
 {
     if (canvas != nullptr)
     {
-        static_cast<ProbeViewerCanvas*> (canvas.get())->setRegions (streamKey, electrodeInds, regionNames, regionColours);
+        static_cast<ProbeViewerCanvas*> (canvas.get())->setRegions (streamKey,
+                                                                    electrodeInds,
+                                                                    regionNames,
+                                                                    regionColours);
     }
+}
+
+void ProbeViewerEditor::timerCallback()
+{
+    auto result = probeViewerProcessor->getLatestLocalizationResult();
+
+    if (result == nullptr
+        || ! result->valid
+        || result == displayedLocalizationResult)
+    {
+        return;
+    }
+
+    displayedLocalizationResult = result;
+
+    Array<int> electrodeInds;
+    Array<String> regionNames;
+    Array<Colour> regionColours;
+
+    electrodeInds.ensureStorageAllocated (static_cast<int> (result->channels.size()));
+    regionNames.ensureStorageAllocated (static_cast<int> (result->channels.size()));
+    regionColours.ensureStorageAllocated (static_cast<int> (result->channels.size()));
+
+    for (const auto& channel : result->channels)
+    {
+        electrodeInds.add (channel.channelIndex);
+        regionNames.add (channel.acronym);
+        regionColours.add (channel.colour);
+    }
+
+    setRegions (result->streamKey,
+                electrodeInds,
+                regionNames,
+                regionColours);
 }

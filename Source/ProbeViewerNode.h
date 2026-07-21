@@ -27,6 +27,15 @@
 #include "ProcessorHeaders.h"
 #include "Utilities/CircularBuffer.hpp"
 
+#include "Localization/LocalizationConfig.hpp"
+#include "Localization/LocalizationResult.hpp"
+#include "Localization/LocalizationWindowAccumulator.hpp"
+#include "Localization/LocalizationWorker.hpp"
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+
 namespace ProbeViewer
 {
 
@@ -44,7 +53,9 @@ public:
     /** Creates the editor UI */
     AudioProcessorEditor* createEditor() override;
 
-    /** Pushes samples to the data buffer*/
+    /** Pushes samples to the data buffer and, when armed, to the
+        localization accumulator. No feature extraction or localization
+        is performed on the acquisition thread. */
     void process (AudioBuffer<float>& buffer) override;
 
     /** Handles incoming events used as triggers */
@@ -58,26 +69,51 @@ public:
     /** Updates the displayed stream, then calls updateSettings() */
     void setDisplayedStream (const String& streamKey);
 
-    /** Gets the displayed stream key*/
+    /** Gets the displayed stream key */
     String getDisplayedStream() const;
 
-    /** Returns the sample rate of the currently selected stream*/
+    /** Returns the sample rate of the currently selected stream */
     float getStreamSampleRate();
 
-    /** Returns the number of samples in the currently selected stream*/
+    /** Returns the number of channels in the currently selected stream */
     int getNumStreamChannels();
 
     /** Enables the editor */
     bool startAcquisition() override;
 
-    /** Disables the editor*/
+    /** Disables the editor */
     bool stopAcquisition() override;
 
-    /** Returns the buffer for the currently selected stream*/
+    /** Returns the buffer for the currently selected stream */
     CircularBuffer* getCircularBufferPtr();
 
     /** Responds to config messages with region info */
     String handleConfigMessage (const String& msg) override;
+
+    // -----------------------------------------------------------------
+    // Localization control API. These methods are called by the editor's
+    // LocalizationPanel. Localization itself runs on LocalizationWorker.
+    // -----------------------------------------------------------------
+    void setLocalizationEnabled (bool enabled);
+    void setLocalizationWindowSeconds (double seconds);
+    void setLocalizationFeatureSource (Localization::FeatureSource source);
+    void setLocalizationModelName (const String& modelName);
+
+    /** Arms one localization window. Samples begin accumulating only after
+        this method is called, normally by pressing the Localize button. */
+    void requestLocalization();
+
+    /** Clears the current window, queued result, and displayed-result state. */
+    void resetLocalization();
+
+    /** Thread-safe snapshot of the latest completed result. */
+    Localization::LocalizationResultPtr getLatestLocalizationResult() const;
+
+    /** Short status string for the localization panel. */
+    String getLocalizationStatus() const;
+
+    /** Fraction of the requested window collected, in [0, 1]. */
+    float getLocalizationProgress() const;
 
 private:
     static const float bufferLengthSeconds;
@@ -90,6 +126,10 @@ private:
     int lastChannelInStream;
 
     Array<bool> channelsToDraw;
+
+    Localization::LocalizationConfig localizationConfig;
+    std::unique_ptr<Localization::LocalizationWorker> localizationWorker;
+    std::unique_ptr<Localization::LocalizationWindowAccumulator> localizationAccumulator;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProbeViewerNode);
 };
