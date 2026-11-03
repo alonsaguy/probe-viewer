@@ -26,6 +26,9 @@
 #include "ProbeViewerCanvas.h"
 #include "ProbeViewerNode.h"
 
+#include <algorithm>
+#include <vector>
+
 using namespace ProbeViewer;
 
 ProbeViewerEditor::ProbeViewerEditor (GenericProcessor* parentNode)
@@ -34,7 +37,7 @@ ProbeViewerEditor::ProbeViewerEditor (GenericProcessor* parentNode)
 {
     probeViewerProcessor = (ProbeViewerNode*) parentNode;
 
-    desiredWidth = 175;
+    desiredWidth = 470;
     addSelectedStreamParameterEditor (Parameter::PROCESSOR_SCOPE, "display_stream", 15, 30);
     auto* streamEditor = getParameterEditor ("display_stream");
     streamEditor->setLayout (ParameterEditor::nameOnTop);
@@ -44,10 +47,17 @@ ProbeViewerEditor::ProbeViewerEditor (GenericProcessor* parentNode)
     streamSampleRateLabel->setFont (FontOptions ("Inter", "Medium", 14.0f));
     streamSampleRateLabel->setBounds (15, 90, 140, 24);
     addAndMakeVisible (streamSampleRateLabel.get());
+
+    localizationPanel = std::make_unique<Localization::LocalizationPanel> (*probeViewerProcessor);
+    localizationPanel->setBounds (170, 26, 290, 116);
+    addAndMakeVisible (localizationPanel.get());
+
+    startTimerHz (5);
 }
 
 ProbeViewerEditor::~ProbeViewerEditor()
 {
+    stopTimer();
 }
 
 Visualizer* ProbeViewerEditor::createNewCanvas()
@@ -89,4 +99,102 @@ void ProbeViewerEditor::setRegions (String streamKey, Array<int>& electrodeInds,
     {
         static_cast<ProbeViewerCanvas*> (canvas.get())->setRegions (streamKey, electrodeInds, regionNames, regionColours);
     }
+}
+
+void ProbeViewerEditor::setLocalizationConfidence (
+    String streamKey,
+    Array<int>& electrodeInds,
+    Array<float>& confidenceValues)
+{
+    if (canvas != nullptr && streamKey.isNotEmpty())
+        static_cast<ProbeViewerCanvas*> (canvas.get())->setLocalizationConfidence (
+            streamKey, electrodeInds, confidenceValues);
+}
+
+void ProbeViewerEditor::timerCallback()
+{
+    probeViewerProcessor->serviceLocalization();
+
+    const auto result = probeViewerProcessor->getLatestLocalizationResult();
+
+    if (result == nullptr || ! result->valid || result == displayedLocalizationResult)
+        return;
+
+    displayedLocalizationResult = result;
+
+    if (canvas != nullptr)
+    {
+        static_cast<ProbeViewerCanvas*> (canvas.get())->setLocalizationResult (
+            result,
+            true);
+    }
+
+    struct Assignment
+    {
+        int electrode = -1;
+        String region;
+        Colour colour;
+        float confidence = 0.0f;
+    };
+
+    std::vector<Assignment> assignments;
+    assignments.reserve (result->channels.size());
+
+    for (const auto& channel : result->channels)
+    {
+        if (channel.electrodeIndex < 0)
+            continue;
+
+        assignments.push_back ({
+            channel.electrodeIndex,
+            channel.acronym,
+            channel.colour,
+            channel.confidence
+        });
+    }
+
+    std::sort (assignments.begin(), assignments.end(),
+        [] (const Assignment& a, const Assignment& b)
+        {
+            return a.electrode < b.electrode;
+        });
+
+    Array<int> electrodeInds;
+    Array<String> regionNames;
+    Array<Colour> regionColours;
+    Array<float> confidenceValues;
+
+    for (const auto& assignment : assignments)
+    {
+        electrodeInds.add (assignment.electrode);
+        regionNames.add (assignment.region);
+        regionColours.add (assignment.colour);
+        confidenceValues.add (assignment.confidence);
+    }
+
+    if (electrodeInds.isEmpty())
+    {
+        DBG ("Probe Viewer localization result contained no valid physical electrode assignments.");
+        return;
+    }
+
+    StringArray targetStreamKeys;
+    if (result->apStreamKey.isNotEmpty())
+        targetStreamKeys.addIfNotAlreadyThere (result->apStreamKey);
+    if (result->lfStreamKey.isNotEmpty())
+        targetStreamKeys.addIfNotAlreadyThere (result->lfStreamKey);
+    if (result->streamKey.isNotEmpty())
+        targetStreamKeys.addIfNotAlreadyThere (result->streamKey);
+
+    const auto displayedStream = probeViewerProcessor->getDisplayedStream();
+    if (displayedStream.isNotEmpty())
+        targetStreamKeys.addIfNotAlreadyThere (displayedStream);
+
+    for (const auto& streamKey : targetStreamKeys)
+    {
+        setRegions (streamKey, electrodeInds, regionNames, regionColours);
+        setLocalizationConfidence (streamKey, electrodeInds, confidenceValues);
+    }
+
+    DBG ("Probe Viewer localization UI updated: regions, confidence and Localization tab.");
 }

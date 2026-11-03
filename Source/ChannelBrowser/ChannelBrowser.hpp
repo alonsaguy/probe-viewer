@@ -25,6 +25,7 @@
 #define ChannelBrowser_hpp
 
 #include "VisualizerWindowHeaders.h"
+#include <limits>
 
 namespace ProbeViewer
 {
@@ -76,7 +77,14 @@ public:
     int getNumChannels() const;
 
     /** Set region info (e.g. from Pinpoint or Trajectory Explorer) */
-    void setRegions (Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours);
+    void setRegions (Array<int>& electrodeInds,
+                     Array<String>& regionNames,
+                     Array<Colour>& regionColours);
+
+    /** Set localization confidence by physical electrode index. */
+    void setLocalizationConfidence (
+        Array<int>& electrodeInds,
+        Array<float>& confidenceValues);
 
     float getViewportScrollPositionRatio();
 
@@ -118,6 +126,8 @@ private:
         float depth = -1;
         int electrode_index = -1;
         Colour colour;
+        float localizationConfidence =
+            std::numeric_limits<float>::quiet_NaN();
     };
 
     Array<ChannelMetadata> channelMetadata;

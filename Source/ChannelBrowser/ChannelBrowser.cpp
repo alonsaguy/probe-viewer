@@ -29,6 +29,25 @@
 
 using namespace ProbeViewer;
 
+namespace
+{
+Colour localizationConfidenceColour (float confidence)
+{
+    confidence = jlimit (0.0f, 1.0f, confidence);
+
+    if (confidence <= 0.5f)
+    {
+        return Colours::red.interpolatedWith (
+            Colours::white,
+            confidence / 0.5f);
+    }
+
+    return Colours::white.interpolatedWith (
+        Colours::blue,
+        (confidence - 0.5f) / 0.5f);
+}
+}
+
 ChannelBrowser::ChannelBrowser (ProbeViewerCanvas* canvas_, const String& streamKey_)
     : canvas (canvas_), streamKey (streamKey_), cursorType (MouseCursor::NormalCursor), numChannels (0), graphicBottomPos (0)
 {
@@ -103,10 +122,43 @@ void ChannelBrowser::paint (Graphics& g)
             float xLocation = PROBE_VIEW_X_OFFSET - (iconHeight / 2);
             float yLocation = getHeight() - iconHeight - ((channel - zoomInfo->lowestChan) * zoomInfo->channelHeight);
 
-            g.setColour (channelMetadata.getReference (channelOrder[channel]).colour);
-            float xWidth = float (PROBE_VIEW_X_OFFSET) - 3.0f;
+            const auto& metadata =
+                channelMetadata.getReference (
+                    channelOrder[channel]);
 
-            g.fillRect (xLocation + 3, yLocation, getWidth() - xLocation, iconHeight + 1.0f);
+            constexpr float confidenceStripeWidth = 6.0f;
+            constexpr float confidenceGap = 2.0f;
+
+            const bool hasConfidence =
+                std::isfinite (
+                    metadata.localizationConfidence);
+
+            const float regionX =
+                xLocation + 3.0f
+                + (hasConfidence
+                       ? confidenceStripeWidth
+                             + confidenceGap
+                       : 0.0f);
+
+            g.setColour (metadata.colour);
+            g.fillRect (
+                regionX,
+                yLocation,
+                getWidth() - regionX,
+                iconHeight + 1.0f);
+
+            if (hasConfidence)
+            {
+                g.setColour (
+                    localizationConfidenceColour (
+                        metadata.localizationConfidence));
+
+                g.fillRect (
+                    xLocation + 3.0f,
+                    yLocation,
+                    confidenceStripeWidth,
+                    iconHeight + 1.0f);
+            }
 
             float alpha = 0.0f;
 
@@ -586,6 +638,44 @@ void ChannelBrowser::setRegions (Array<int>& electrodeInds, Array<String>& newRe
 
                 lastRegion = newRegionNames[i];*/
 
+                break;
+            }
+        }
+    }
+
+    startTimer (10);
+}
+
+
+void ChannelBrowser::setLocalizationConfidence (
+    Array<int>& electrodeInds,
+    Array<float>& confidenceValues)
+{
+    const int count =
+        jmin (
+            electrodeInds.size(),
+            confidenceValues.size());
+
+    for (int i = 0; i < count; ++i)
+    {
+        const int electrodeIndex =
+            electrodeInds[i];
+
+        for (int ch = 0;
+             ch < channelMetadata.size();
+             ++ch)
+        {
+            auto& metadata =
+                channelMetadata.getReference (ch);
+
+            if (metadata.electrode_index
+                == electrodeIndex)
+            {
+                metadata.localizationConfidence =
+                    jlimit (
+                        0.0f,
+                        1.0f,
+                        confidenceValues[i]);
                 break;
             }
         }

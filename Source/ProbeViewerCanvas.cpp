@@ -29,6 +29,7 @@
 
 #include "ProbeViewerEditor.h"
 #include "ProbeViewerNode.h"
+#include "Localization/LocalizationSliceView.hpp"
 
 #include "ChannelBrowser/ChannelBrowser.hpp"
 #include "ChannelViewCanvas/AverageView.hpp"
@@ -80,6 +81,18 @@ ProbeViewerCanvas::ProbeViewerCanvas (ProbeViewerNode* processor_)
         fftInput.push_back (0.0f);
     }
 
+    signalsTabButton = std::make_unique<juce::TextButton> ("Signals");
+    localizationTabButton = std::make_unique<juce::TextButton> ("Localization");
+    localizationSliceView = std::make_unique<LocalizationSliceView>();
+
+    signalsTabButton->onClick = [this] { showSignalsTab(); };
+    localizationTabButton->onClick = [this] { showLocalizationTab(); };
+
+    addAndMakeVisible (signalsTabButton.get());
+    addAndMakeVisible (localizationTabButton.get());
+    addChildComponent (localizationSliceView.get());
+
+    updateTabVisibility();
     isUpdating = false;
 }
 
@@ -106,6 +119,8 @@ void ProbeViewerCanvas::updateSettings()
     numChannels = jmax (pvProcessor->getNumStreamChannels(), 0);
 
     channelsView->updateViewSettings();
+
+    channelsView->rollingView->channels.clear();
 
     partialBufferCache.clear();
     channelFFTSampleBuffer.clear();
@@ -143,19 +158,26 @@ void ProbeViewerCanvas::updateSettings()
         inputDownsamplingIndex.push_back (0);
     }
 
-    numSamplesToChunk = int (sampleRate / ProbeViewerCanvas::FFT_TARGET_SAMPLE_RATE);
+    numSamplesToChunk = jmax (1, int (sampleRate / ProbeViewerCanvas::FFT_TARGET_SAMPLE_RATE));
 
     optionsBar->setFFTParams (ProbeViewerCanvas::FFT_SIZE, ProbeViewerCanvas::FFT_TARGET_SAMPLE_RATE);
 
     resized();
+    updateTabVisibility();
 
     isUpdating = false;
 }
 
 void ProbeViewerCanvas::refresh()
 {
-    updateScreenBuffers();
+    if (showingLocalization)
+    {
+        if (localizationSliceView != nullptr)
+            localizationSliceView->repaint();
+        return;
+    }
 
+    updateScreenBuffers();
     channelsView->rollingView->refresh();
 }
 
@@ -173,9 +195,96 @@ void ProbeViewerCanvas::endAnimation()
     stopCallbacks();
 }
 
-void ProbeViewerCanvas::setRegions (String streamKey, Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours)
+void ProbeViewerCanvas::setRegions (
+    String streamKey,
+    Array<int>& electrodeInds,
+    Array<String>& regionNames,
+    Array<Colour>& regionColours)
 {
-    channelBrowserMap[streamKey]->setRegions (electrodeInds, regionNames, regionColours);
+    const auto found =
+        channelBrowserMap.find (streamKey);
+
+    if (found != channelBrowserMap.end()
+        && found->second != nullptr)
+    {
+        found->second->setRegions (
+            electrodeInds,
+            regionNames,
+            regionColours);
+    }
+}
+
+void ProbeViewerCanvas::setLocalizationConfidence (
+    String streamKey,
+    Array<int>& electrodeInds,
+    Array<float>& confidenceValues)
+{
+    const auto found =
+        channelBrowserMap.find (streamKey);
+
+    if (found != channelBrowserMap.end()
+        && found->second != nullptr)
+    {
+        found->second->setLocalizationConfidence (
+            electrodeInds,
+            confidenceValues);
+    }
+}
+
+void ProbeViewerCanvas::setLocalizationResult (
+    Localization::LocalizationResultPtr result,
+    bool showLocalization)
+{
+    if (localizationSliceView != nullptr)
+        localizationSliceView->setLocalizationResult (result);
+
+    if (showLocalization)
+        showLocalizationTab();
+}
+
+void ProbeViewerCanvas::showSignalsTab()
+{
+    showingLocalization = false;
+    updateTabVisibility();
+}
+
+void ProbeViewerCanvas::showLocalizationTab()
+{
+    showingLocalization = true;
+    updateTabVisibility();
+}
+
+void ProbeViewerCanvas::updateTabVisibility()
+{
+    const bool showSignals = ! showingLocalization;
+
+    if (timeScale != nullptr)
+        timeScale->setVisible (showSignals);
+    if (optionsBar != nullptr)
+        optionsBar->setVisible (showSignals);
+    if (viewport != nullptr)
+        viewport->setVisible (showSignals);
+
+    for (auto* browser : channelBrowsers)
+    {
+        if (browser != nullptr)
+        {
+            const bool correctStream =
+                browser->streamKey == pvProcessor->getDisplayedStream();
+            browser->setVisible (showSignals && correctStream);
+        }
+    }
+
+    if (localizationSliceView != nullptr)
+        localizationSliceView->setVisible (showingLocalization);
+
+    if (signalsTabButton != nullptr)
+        signalsTabButton->setToggleState (showSignals, juce::dontSendNotification);
+    if (localizationTabButton != nullptr)
+        localizationTabButton->setToggleState (showingLocalization, juce::dontSendNotification);
+
+    resized();
+    repaint();
 }
 
 void ProbeViewerCanvas::saveCustomParametersToXml (XmlElement* xml)
@@ -221,30 +330,53 @@ void ProbeViewerCanvas::paint (Graphics& g)
 
 void ProbeViewerCanvas::resized()
 {
-    timeScale->setBounds (0, 0, getWidth(), 30);
+    constexpr int tabHeight = 28;
+
+    if (signalsTabButton != nullptr)
+        signalsTabButton->setBounds (8, 2, 95, 24);
+    if (localizationTabButton != nullptr)
+        localizationTabButton->setBounds (106, 2, 115, 24);
+
+    if (localizationSliceView != nullptr)
+        localizationSliceView->setBounds (
+            0, tabHeight, getWidth(), juce::jmax (0, getHeight() - tabHeight));
+
+    if (showingLocalization)
+        return;
+
+    timeScale->setBounds (0, tabHeight, getWidth(), 30);
     timeScale->setMarginOffset (200);
 
-    if (optionsBar->isScrollBarVisible(getWidth()))
+    if (optionsBar->isScrollBarVisible (getWidth()))
         optionsBar->setBounds (0, getHeight() - 42, getWidth(), 42);
     else
         optionsBar->setBounds (0, getHeight() - 30, getWidth(), 30);
-    
+
     optionsBar->setMarginOffset (200);
 
     for (auto browser : channelBrowsers)
-        browser->setBounds (0, timeScale->getBottom(), 200, getHeight() - timeScale->getHeight() - optionsBar->getHeight());
+        browser->setBounds (
+            0,
+            timeScale->getBottom(),
+            200,
+            getHeight() - timeScale->getBottom() - optionsBar->getHeight());
 
     ChannelBrowser* cb = getChannelBrowserPtr();
     if (cb)
     {
-        viewport->setBounds (cb->getRight(),
-                             timeScale->getBottom() + 2,
-                             getWidth() - cb->getWidth(),
-                             getHeight() - timeScale->getHeight() - optionsBar->getHeight() - 4);
+        viewport->setBounds (
+            cb->getRight(),
+            timeScale->getBottom() + 2,
+            getWidth() - cb->getWidth(),
+            getHeight() - timeScale->getBottom() - optionsBar->getHeight() - 4);
 
-        viewport->setViewPositionProportionately (0, cb->getViewportScrollPositionRatio());
+        viewport->setViewPositionProportionately (
+            0, cb->getViewportScrollPositionRatio());
 
-        channelsView->setBounds (0, 0, viewport->getWidth(), channelsView->rollingView->getChannelHeight() * channelsView->rollingView->channels.size());
+        channelsView->setBounds (
+            0, 0, viewport->getWidth(),
+            channelsView->rollingView->getChannelHeight()
+                * channelsView->rollingView->channels.size());
     }
 }
 
@@ -327,6 +459,13 @@ float ProbeViewerCanvas::getChannelHeight()
 
 float ProbeViewerCanvas::getChannelSampleRate (int channel)
 {
+    if (channelsView == nullptr
+        || channelsView->rollingView == nullptr
+        || channel < 0
+        || channel >= channelsView->rollingView->channels.size()
+        || channelsView->rollingView->channels[channel] == nullptr)
+        return 0.0f;
+
     return channelsView->rollingView->channels[channel]->getSampleRate();
 }
 
@@ -367,6 +506,17 @@ void ProbeViewerCanvas::updateScreenBuffers()
     if (! dataBuffer || isUpdating)
         return;
 
+    if (numChannels <= 0
+        || channelsView == nullptr
+        || channelsView->rollingView == nullptr
+        || channelsView->rollingView->channels.size() < numChannels
+        || partialBufferCache.size() < numChannels
+        || channelFFTSampleBuffer.size() < numChannels
+        || static_cast<int> (inputDownsamplingIndex.size()) < numChannels)
+    {
+        return;
+    }
+
     if (dataBuffer->hasSamplesReadyForDrawing())
     {
         ScopedLock drawLock (*dataBuffer->getMutex());
@@ -404,7 +554,7 @@ void ProbeViewerCanvas::updateScreenBuffers()
 
             int sampleBufferIndex = 0;
 
-            samples.resize (numTicks);
+            samples.resize (jmax (1, static_cast<int> (std::ceil (samplesPerPixel))));
 
             for (int pix = 0; pix < numTicks; ++pix)
             {
@@ -532,7 +682,7 @@ void ProbeViewerCanvas::updateScreenBuffers()
 
             for (int sampIdx = sampleBufferIndex; sampIdx < numSamplesToRead; ++sampIdx)
             {
-                partialBufferCache[channel]->add (dataBuffer->getSample (sampleBufferIndex, channel));
+                partialBufferCache[channel]->add (dataBuffer->getSample (sampIdx, channel));
             }
         }
 
@@ -553,6 +703,11 @@ void ProbeViewerCanvas::updateScreenBuffers()
 
 int ProbeViewerCanvas::getNumCachedSamples (int channel)
 {
+    if (channel < 0
+        || channel >= partialBufferCache.size()
+        || partialBufferCache[channel] == nullptr)
+        return 0;
+
     return partialBufferCache[channel]->size();
 }
 

@@ -26,11 +26,15 @@
 
 #include "VisualizerEditorHeaders.h"
 
+#include "Localization/LocalizationPanel.hpp"
+#include "Localization/LocalizationResult.hpp"
+
 namespace ProbeViewer
 {
 
 class ProbeViewerEditor
-    : public VisualizerEditor
+    : public VisualizerEditor,
+      private Timer
 {
 public:
     /** Constructor */
@@ -55,10 +59,19 @@ public:
     /** Sets custom regions by electrode index */
     void setRegions (String streamKey, Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours);
 
+    /** Sets the localization confidence of each electrode (0 for channels without signal) */
+    void setLocalizationConfidence (String streamKey, Array<int>& electrodeInds, Array<float>& confidenceValues);
+
 private:
+    /** Keeps the localization capturing and shows each new estimate */
+    void timerCallback() override;
+
     class ProbeViewerNode* probeViewerProcessor;
 
     std::unique_ptr<Label> streamSampleRateLabel;
+
+    std::unique_ptr<Localization::LocalizationPanel> localizationPanel;
+    Localization::LocalizationResultPtr displayedLocalizationResult;
 
     bool hasNoInputs;
 

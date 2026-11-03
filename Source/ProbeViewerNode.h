@@ -27,6 +27,13 @@
 #include "ProcessorHeaders.h"
 #include "Utilities/CircularBuffer.hpp"
 
+#include "Localization/LocalizationConfig.hpp"
+#include "Localization/LocalizationResult.hpp"
+#include "Localization/LocalizationWindowAccumulator.hpp"
+#include "Localization/LocalizationWorker.hpp"
+
+#include <memory>
+
 namespace ProbeViewer
 {
 
@@ -79,6 +86,30 @@ public:
     /** Responds to config messages with region info */
     String handleConfigMessage (const String& msg) override;
 
+    /** Real-time probe localization (Localization/): the localizer bundle directory (empty: the
+        default one) and the planned trajectory file (ephysatlas plan JSON, Pinpoint export or
+        xyz trajectory) */
+    void setLocalizationBundleDirectory (const String& directory);
+    String getLocalizationBundleDirectory() const;
+    void setLocalizationPlannedTrajectoryFile (const String& filename);
+    String getLocalizationPlannedTrajectoryFile() const;
+
+    /** Starts localizing the displayed probe: AP + LF snippets are captured back to back from now
+        on, and each one updates the estimate */
+    void requestLocalization();
+
+    /** Starts capturing the next snippet once the worker is free (called on the message thread) */
+    void serviceLocalization();
+
+    /** Forgets the snippets and the estimate */
+    void resetLocalization();
+
+    /** The latest localization (null before the first one) */
+    Localization::LocalizationResultPtr getLatestLocalizationResult() const;
+
+    /** What the localization is doing, for the editor */
+    String getLocalizationStatus() const;
+
 private:
     static const float bufferLengthSeconds;
 
@@ -90,6 +121,10 @@ private:
     int lastChannelInStream;
 
     Array<bool> channelsToDraw;
+
+    Localization::LocalizationConfig localizationConfig;
+    std::unique_ptr<Localization::LocalizationWorker> localizationWorker;
+    std::unique_ptr<Localization::LocalizationWindowAccumulator> localizationAccumulator;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProbeViewerNode);
 };

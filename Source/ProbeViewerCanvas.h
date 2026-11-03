@@ -27,8 +27,12 @@
 #include "VisualizerWindowHeaders.h"
 #include "kissfft/kiss_fftr.h"
 
+#include "Localization/LocalizationResult.hpp"
+
 namespace ProbeViewer
 {
+
+class LocalizationSliceView;
 
 class ProbeViewerCanvas : public Visualizer
 {
@@ -72,6 +76,16 @@ public:
 
     /** Set custom brain regions for each electrode */
     void setRegions (String streamKey, Array<int>& electrodeInds, Array<String>& regionNames, Array<Colour>& regionColours);
+
+    /** Set the localization confidence of each electrode */
+    void setLocalizationConfidence (String streamKey, Array<int>& electrodeInds, Array<float>& confidenceValues);
+
+    /** Show a localization estimate in the Localization tab (and switch to it if asked) */
+    void setLocalizationResult (Localization::LocalizationResultPtr result, bool showLocalizationTab = true);
+
+    /** Switch between the signals and the localization slices */
+    void showSignalsTab();
+    void showLocalizationTab();
 
     /**
      *  Custom member methods
@@ -130,7 +144,14 @@ public:
 #endif
 
 private:
+    void updateTabVisibility();
+
     class ProbeViewerNode* pvProcessor;
+
+    std::unique_ptr<juce::TextButton> signalsTabButton;
+    std::unique_ptr<juce::TextButton> localizationTabButton;
+    std::unique_ptr<LocalizationSliceView> localizationSliceView;
+    bool showingLocalization = false;
 
     OwnedArray<ChannelBrowser> channelBrowsers;
     std::map<String, ChannelBrowser*> channelBrowserMap;
