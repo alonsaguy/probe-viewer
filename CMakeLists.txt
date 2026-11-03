@@ -34,6 +34,17 @@ set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS
 
 set(SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Source)
 file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false "${SOURCE_PATH}/*.cpp" "${SOURCE_PATH}/*.c" "${SOURCE_PATH}/*.h" "${SOURCE_PATH}/*.hpp")
+
+# The probe localization's signal processing (Cadzow SVDs, FFTs, spectral fits) is ~25x slower
+# unoptimised: in MSVC Debug builds (to match a Debug open-ephys.lib) compile those sources with
+# /O2, dropping /RTC1, which cannot be combined with it.
+if(MSVC)
+	string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+	file(GLOB LOCALIZATION_HOT_SOURCES
+		"${SOURCE_PATH}/Localization/Realtime/*.cpp"
+		"${SOURCE_PATH}/Localization/FeatureExtractor.cpp")
+	set_source_files_properties(${LOCALIZATION_HOT_SOURCES} PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:/O2;/Ob2>")
+endif()
 set(GUI_COMMONLIB_DIR ${GUI_BASE_DIR}/installed_libs)
 
 set(CONFIGURATION_FOLDER $<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Debug>>:Release>)
@@ -87,6 +98,19 @@ elseif(APPLE)
 
 	install(TARGETS ${PLUGIN_NAME} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/plugins-api10)
 	set(CMAKE_PREFIX_PATH /opt/local)
+endif()
+
+# Optional: the localizer self-test, which checks the C++ localizer against the Python one on
+# the self-test written into a localizer bundle (no JUCE, no GUI needed).
+option(PROBE_VIEWER_BUILD_SELFTEST "Build probe-viewer-localizer-selftest" OFF)
+if(PROBE_VIEWER_BUILD_SELFTEST)
+	add_executable(probe-viewer-localizer-selftest
+		${CMAKE_CURRENT_SOURCE_DIR}/Tools/LocalizerSelfTest.cpp
+		${SOURCE_PATH}/Localization/Realtime/EphysOnlyLocalizer.cpp)
+	set_property(TARGET probe-viewer-localizer-selftest PROPERTY CXX_STANDARD 17)
+	if(MSVC)
+		target_compile_options(probe-viewer-localizer-selftest PRIVATE /O2)
+	endif()
 endif()
 
 #create filters for vs and xcode

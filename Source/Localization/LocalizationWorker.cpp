@@ -172,7 +172,7 @@ bool LocalizationWorker::prepareRealtime (const LocalizationConfig& config, int 
     const auto dir = findBundleDirectory (config.realtime.bundleDirectory);
     if (! dir.isDirectory())
     {
-        error = "no localizer bundle: export one with ibleatools scripts/export_localizer_bundle.py";
+        error = "no localizer bundle: download it (see the README) and choose its folder with Bundle...";
         return false;
     }
     if (bundle == nullptr || dir.getFullPathName() != bundleDirectory)
