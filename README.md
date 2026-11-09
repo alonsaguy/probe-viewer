@@ -49,7 +49,7 @@ The method is the ephys-only localizer of the [IBL ephys atlas](https://github.c
 2. Click **Plan...** and choose the planned trajectory file. For a Pinpoint experiment with several probes, pick the probe in the menu that opens (the one whose name matches the displayed stream, e.g. `Probe A` for `ProbeA-AP`, is ticked).
 3. Select the probe's AP or LFP stream as the displayed stream, start acquisition and click **Localize**. The status line shows the snippets as they are collected and localized; **Reset** forgets them (e.g. after moving the probe).
 
-Processing a snippet takes 7-10 s on a 22-core PC; snippets are taken back to back whenever the previous one is done, so the estimate updates every 12-15 s. It is about as good after the first snippet as after five minutes.
+Processing a snippet takes about 12 s on a 16-core laptop (the status line shows the time of each one); snippets are taken back to back whenever the previous one is done, so the estimate updates every 15-20 s. It is about as good after the first snippet as after five minutes. The localization runs below normal priority on at most 8 threads (half the logical processors), so acquisition and the UI keep priority; to change the number of threads, set the environment variable `PROBE_VIEWER_LOCALIZER_THREADS` before starting the GUI (fewer threads: a lighter load and slower updates).
 
 **Accuracy** on 196 held-out IBL insertions (features of the IBL release, compared with the histology-based alignment; medians over insertions):
 

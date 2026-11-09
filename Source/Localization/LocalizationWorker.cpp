@@ -1,4 +1,5 @@
 #include "LocalizationWorker.hpp"
+#include "Realtime/Threads.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -297,12 +298,16 @@ LocalizationResult LocalizationWorker::runRealtime (LocalizationInput& input, co
                                 + " snippets | score " + juce::String (out.score, 3);
     result.initializationFilePath = planFile;
     result.valid = true;
-    result.status = "Snippet " + juce::String (update.nSnippets) + " localized (score " + juce::String (out.score, 3) + ")";
+    const double seconds = juce::Time::getMillisecondCounterHiRes() * 1e-3 - result.createdTimeSeconds;
+    result.status = "Snippet " + juce::String (update.nSnippets) + " localized in " + juce::String (seconds, 1)
+                  + " s (score " + juce::String (out.score, 3) + ")";
     return result;
 }
 
 void LocalizationWorker::loop()
 {
+    // The localization uses only the CPU time that acquisition and the UI leave idle.
+    Realtime::lowerThreadPriority();
     for (;;)
     {
         LocalizationInput input;

@@ -1,6 +1,7 @@
 #include "Cadzow.hpp"
 
 #include "PyDsp.hpp"
+#include "Threads.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -482,7 +483,10 @@ std::vector<double> cadzowDenoise (const std::vector<double>& wav, int nc, int n
     const int nThreads = std::max (1, p.threads);
     std::vector<std::thread> pool;
     for (int t = 1; t < nThreads; ++t)
-        pool.emplace_back (worker);
+        pool.emplace_back ([&worker] {
+            lowerThreadPriority();
+            worker();
+        });
     worker();
     for (auto& t : pool)
         t.join();

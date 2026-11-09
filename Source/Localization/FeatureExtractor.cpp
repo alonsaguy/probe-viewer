@@ -1,6 +1,7 @@
 #include "FeatureExtractor.hpp"
 #include "Realtime/BadChannels.hpp"
 #include "Realtime/IblLfFeatures.hpp"
+#include "Realtime/Threads.hpp"
 
 #include <thread>
 #include "../kissfft/kiss_fftr.h"
@@ -18,10 +19,6 @@ namespace ProbeViewer::Localization
 namespace
 {
 constexpr double eps = 1.0e-30;
-
-// Deliberately leave CPU capacity for Open Ephys, the UI and Windows.
-// Increase only if profiling shows substantial headroom.
-constexpr int maxFeatureThreads = 4;
 
 // CAR is expensive at AP sample rates. Processing contiguous time blocks
 // avoids scheduling hundreds of thousands of tiny parallel tasks and lets
@@ -85,18 +82,12 @@ int featureThreadCount (int count)
     if (count <= 0)
         return 0;
 
-    const unsigned int hardwareThreads =
-        juce::jmax (
-            1u,
-            std::thread::hardware_concurrency());
-
+    // Realtime::localizerThreads leaves CPU capacity for Open Ephys, the UI and the OS.
     return juce::jmax (
         1,
         juce::jmin (
             count,
-            juce::jmin (
-                maxFeatureThreads,
-                static_cast<int> (hardwareThreads))));
+            Realtime::localizerThreads()));
 }
 
 template <typename Function>
@@ -129,6 +120,8 @@ void parallelFor (
         workers.emplace_back (
             [&]()
             {
+                Realtime::lowerThreadPriority();
+
                 for (;;)
                 {
                     const int i =
@@ -1434,7 +1427,7 @@ FeatureMatrix FeatureExtractor::extract (
 
         // ibldsp.voltage.detect_bad_channels on the raw snippet; the labels drive the
         // interpolation and CAR of both bands, as in ephysatlas.realtime.snippet_features.
-        const int labelThreads = juce::jmax (1, static_cast<int> (std::thread::hardware_concurrency()) - 2);
+        const int labelThreads = Realtime::localizerThreads();
         const auto badChannelStats = Realtime::badChannelRawStats (
             ap.data(), input.ap.numChannels, input.ap.numSamples, input.ap.sampleRate, labelThreads);
 
@@ -1797,8 +1790,7 @@ FeatureMatrix FeatureExtractor::extract (
             std::vector<double> lfDouble (lf.begin(), lf.end());
             const auto geometry = Realtime::Np1Geometry::make (nc);
             const auto csd = Realtime::bprFeatures (
-                lfDouble, nc, ns, lfSampleRate, geometry,
-                juce::jmax (1, static_cast<int> (std::thread::hardware_concurrency()) - 2));
+                lfDouble, nc, ns, lfSampleRate, geometry, Realtime::localizerThreads());
             // FeatureExtractor columns 7..13: psd_lfp, alpha, beta, gamma, delta, theta (bpr),
             // rms_lf_bpr; csd.bandDb order: delta, theta, alpha, beta, gamma, lfp.
             constexpr int bandOfColumn[6] = { 5, 2, 3, 4, 0, 1 };

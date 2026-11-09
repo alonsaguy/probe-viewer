@@ -32,12 +32,26 @@ Fft::Fft (int size) : n (size)
             factors.push_back (p);
             m /= p;
         }
+    for (int p : factors)
+        maxFactor = std::max (maxFactor, p);
     twiddles.resize (static_cast<size_t> (n));
     for (int k = 0; k < n; ++k)
         twiddles[static_cast<size_t> (k)] = std::polar (1.0, -2.0 * kPi * k / n);
 }
 
-void Fft::recurse (const cplx* in, cplx* out, int stride, int m, size_t f, bool inverse, std::vector<cplx>& scratch) const
+void Fft::prepare (Work& work) const
+{
+    // One stage's p values per factor (the stages of one recursion path are live together).
+    const size_t scratch = static_cast<size_t> (maxFactor) * (factors.size() + 1);
+    if (work.in.size() != static_cast<size_t> (n))
+        work.in.resize (static_cast<size_t> (n));
+    if (work.out.size() != static_cast<size_t> (n))
+        work.out.resize (static_cast<size_t> (n));
+    if (work.scratch.size() < scratch)
+        work.scratch.resize (scratch);
+}
+
+void Fft::recurse (const cplx* in, cplx* out, int stride, int m, size_t f, bool inverse, cplx* scratch) const
 {
     if (m == 1)
     {
@@ -49,13 +63,7 @@ void Fft::recurse (const cplx* in, cplx* out, int stride, int m, size_t f, bool 
     for (int q = 0; q < p; ++q)
         recurse (in + static_cast<ptrdiff_t> (q) * stride, out + static_cast<ptrdiff_t> (q) * mm, stride * p, mm, f + 1, inverse, scratch);
     const int twStep = n / m; // twiddle index step for this stage
-    cplx* t = scratch.data() + f * 64; // up to 64 values per stage (factors <= 64 assumed)
-    std::vector<cplx> big;
-    if (p > 64)
-    {
-        big.resize (static_cast<size_t> (p));
-        t = big.data();
-    }
+    cplx* t = scratch + f * static_cast<size_t> (maxFactor);
     for (int k = 0; k < mm; ++k)
     {
         for (int q = 0; q < p; ++q)
@@ -85,9 +93,17 @@ void Fft::transform (std::vector<cplx>& data, bool inverse) const
     if (static_cast<int> (data.size()) != n)
         throw std::runtime_error ("FFT input has the wrong length");
     std::vector<cplx> out (static_cast<size_t> (n));
-    std::vector<cplx> scratch (64 * (factors.size() + 1));
-    recurse (data.data(), out.data(), 1, n, 0, inverse, scratch);
+    std::vector<cplx> scratch (static_cast<size_t> (maxFactor) * (factors.size() + 1));
+    recurse (data.data(), out.data(), 1, n, 0, inverse, scratch.data());
     data.swap (out);
+}
+
+void Fft::rfft (const double* x, Work& work) const
+{
+    prepare (work);
+    for (int i = 0; i < n; ++i)
+        work.in[static_cast<size_t> (i)] = cplx (x[i], 0.0);
+    recurse (work.in.data(), work.out.data(), 1, n, 0, false, work.scratch.data());
 }
 
 std::vector<cplx> Fft::rfft (const double* x) const
@@ -202,6 +218,7 @@ void welch (const double* x, int n, double fs, int nperseg, std::vector<double>&
     freqs.resize (static_cast<size_t> (nb));
     psd.assign (static_cast<size_t> (nb), 0.0);
     std::vector<double> seg (static_cast<size_t> (nperseg));
+    Fft::Work work;
     for (int s = 0; s < nseg; ++s)
     {
         const double* p = x + static_cast<ptrdiff_t> (s) * step;
@@ -211,9 +228,9 @@ void welch (const double* x, int n, double fs, int nperseg, std::vector<double>&
         mean /= nperseg;
         for (int i = 0; i < nperseg; ++i)
             seg[static_cast<size_t> (i)] = (p[i] - mean) * win[static_cast<size_t> (i)];
-        const auto X = fft.rfft (seg.data());
+        fft.rfft (seg.data(), work);
         for (int k = 0; k < nb; ++k)
-            psd[static_cast<size_t> (k)] += std::norm (X[static_cast<size_t> (k)]);
+            psd[static_cast<size_t> (k)] += std::norm (work.out[static_cast<size_t> (k)]);
     }
     for (int k = 0; k < nb; ++k)
     {

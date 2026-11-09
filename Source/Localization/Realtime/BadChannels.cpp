@@ -1,6 +1,7 @@
 #include "BadChannels.hpp"
 
 #include "PyDsp.hpp"
+#include "Threads.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,7 +18,10 @@ void parallelChunks (int n, int threads, Fn&& fn)
     threads = std::max (1, std::min (threads, n));
     std::vector<std::thread> pool;
     for (int t = 0; t < threads; ++t)
-        pool.emplace_back ([&, t] { fn (n * t / threads, n * (t + 1) / threads); });
+        pool.emplace_back ([&, t] {
+            lowerThreadPriority();
+            fn (n * t / threads, n * (t + 1) / threads);
+        });
     for (auto& th : pool)
         th.join();
 }

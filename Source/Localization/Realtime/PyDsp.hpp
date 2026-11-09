@@ -25,11 +25,22 @@ public:
     // n/2 + 1 bins -> real signal of length n (numpy.fft.irfft, with 1/n scaling).
     std::vector<double> irfft (const std::vector<cplx>& bins) const;
 
+    // Buffers for repeated transforms, so that a loop of rfft calls allocates nothing after the
+    // first: heap allocations are serialised in Debug builds, which stalls parallel callers.
+    struct Work
+    {
+        std::vector<cplx> in, out, scratch;
+    };
+    // rfft into work.out[0 .. n/2] (the rest of work.out is scratch).
+    void rfft (const double* x, Work& work) const;
+
 private:
     int n;
+    int maxFactor = 1;
     std::vector<int> factors;
     std::vector<cplx> twiddles; // exp(-2 pi i k / n)
-    void recurse (const cplx* in, cplx* out, int stride, int m, size_t factorIdx, bool inverse, std::vector<cplx>& scratch) const;
+    void prepare (Work& work) const;
+    void recurse (const cplx* in, cplx* out, int stride, int m, size_t factorIdx, bool inverse, cplx* scratch) const;
 };
 
 // scipy.signal.firwin(numtaps, cutoff, window='hamming') for a low-pass, cutoff relative to Nyquist.
