@@ -2,10 +2,15 @@
 // self-test written into a localizer bundle by ephysatlas.realtime.bundle.export_localizer_bundle.
 //
 // Usage: probe-viewer-localizer-selftest <bundle directory>
+//
+// With --plan, it instead reads a plan file as the plugin does and prints the Beryl regions of
+// its planned channels, top of the probe first (and their positions with --csv):
+//   probe-viewer-localizer-selftest <bundle directory> --plan <file> [probe name] [--csv <out.csv>]
 
 #include "../Source/Localization/Realtime/EphysOnlyLocalizer.hpp"
 #include "../Source/Localization/Realtime/MiniJson.hpp"
 #include "../Source/Localization/Realtime/Npy.hpp"
+#include "../Source/Localization/Realtime/PlanFile.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +41,46 @@ std::vector<V3> toV3 (const std::vector<double>& flat)
 }
 
 double relErr (double a, double b) { return std::abs (a - b) / std::max (1.0, std::abs (b)); }
+
+// --plan: the planned channels of a plan file and their regions.
+int printPlan (const LocalizerBundle& bundle, const std::string& path, const std::string& probe, const std::string& csv)
+{
+    std::vector<PlanPoint> plan;
+    std::string source, error;
+    if (! loadPlanFile (path, 384, plan, source, error, probe))
+    {
+        std::printf ("cannot read the plan: %s\n", error.c_str());
+        return 2;
+    }
+    auto um = [] (const PlanPoint& p) { return std::to_string (std::lround (p[0] * 1e6)) + ", " + std::to_string (std::lround (p[1] * 1e6)) + ", " + std::to_string (std::lround (p[2] * 1e6)); };
+    std::printf ("%s (%s): %zu channels; top (%s) um, deepest channel (%s) um (IBL x ML, y AP, z DV)\n", path.c_str(), source.c_str(),
+                 plan.size(), um (plan.front()).c_str(), um (plan.back()).c_str());
+    // The bundle's labels cover the left hemisphere; the atlas is symmetric.
+    std::string runs, last;
+    int count = 0;
+    for (const auto& p : plan)
+    {
+        const int row = bundle.regionAt ({ -std::abs (p[0]), p[1], p[2] }, true);
+        const std::string acronym = row < 0 ? "outside" : bundle.regions[static_cast<size_t> (row)].acronym;
+        if (acronym != last && count > 0)
+        {
+            runs += " " + last + "(" + std::to_string (count) + ")";
+            count = 0;
+        }
+        last = acronym;
+        ++count;
+    }
+    runs += " " + last + "(" + std::to_string (count) + ")";
+    std::printf ("Beryl regions, top -> tip (channels):%s\n", runs.c_str());
+    if (! csv.empty())
+    {
+        std::ofstream out (csv);
+        out << "channel,x_m,y_m,z_m\n";
+        for (size_t r = 0; r < plan.size(); ++r)
+            out << plan.size() - 1 - r << "," << plan[r][0] << "," << plan[r][1] << "," << plan[r][2] << "\n";
+    }
+    return 0;
+}
 } // namespace
 
 int main (int argc, char** argv)
@@ -55,6 +100,18 @@ int main (int argc, char** argv)
     }
     std::printf ("bundle %s: %d features (%s), %zu lattice voxels, T=%g, nu=%g, width=%g\n",
                  dir.c_str(), bundle.F, bundle.featureSet.c_str(), bundle.voxelUm.size(), bundle.T, bundle.nu, bundle.widen);
+    if (argc >= 4 && std::string (argv[2]) == "--plan")
+    {
+        std::string probe, csv;
+        for (int i = 4; i < argc; ++i)
+        {
+            if (std::string (argv[i]) == "--csv" && i + 1 < argc)
+                csv = argv[++i];
+            else
+                probe = argv[i];
+        }
+        return printPlan (bundle, argv[3], probe, csv);
+    }
 
     std::ifstream mf (dir + "/manifest.json", std::ios::binary);
     std::stringstream ss;

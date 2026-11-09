@@ -573,14 +573,20 @@ String ProbeViewerNode::getLocalizationBundleDirectory() const
     return localizationConfig.realtime.bundleDirectory;
 }
 
-void ProbeViewerNode::setLocalizationPlannedTrajectoryFile (const String& filename)
+void ProbeViewerNode::setLocalizationPlannedTrajectoryFile (const String& filename, const String& probe)
 {
     localizationConfig.initialTrajectoryFile = filename.trim();
+    localizationConfig.initialTrajectoryProbe = probe;
 }
 
 String ProbeViewerNode::getLocalizationPlannedTrajectoryFile() const
 {
     return localizationConfig.initialTrajectoryFile;
+}
+
+String ProbeViewerNode::getLocalizationPlannedTrajectoryProbe() const
+{
+    return localizationConfig.initialTrajectoryProbe;
 }
 
 void ProbeViewerNode::requestLocalization()

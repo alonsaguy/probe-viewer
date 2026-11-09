@@ -1,9 +1,19 @@
 #include "LocalizationPanel.hpp"
 
 #include "../ProbeViewerNode.h"
+#include "Realtime/PlanFile.hpp"
 
 namespace ProbeViewer::Localization
 {
+namespace
+{
+// Lower-case letters and digits only: "Probe A" and "ProbeA-AP" share "probea".
+juce::String squash (const juce::String& s)
+{
+    return s.toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz0123456789");
+}
+} // namespace
+
 LocalizationPanel::LocalizationPanel (ProbeViewerNode& n) : node (n)
 {
     for (auto* b : { &localize, &reset, &planButton, &bundleButton })
@@ -18,7 +28,8 @@ LocalizationPanel::LocalizationPanel (ProbeViewerNode& n) : node (n)
     status.setJustificationType (juce::Justification::topLeft);
     localize.setTooltip ("Localize the probe continuously: a 5 s AP + LF snippet whenever the last one is done");
     reset.setTooltip ("Forget the snippets and the result");
-    planButton.setTooltip ("Planned trajectory: an ephysatlas-plan/1 JSON file (ephysatlas.realtime.plan)");
+    planButton.setTooltip ("Planned trajectory: an ephysatlas-plan/1 JSON file (ephysatlas.realtime.plan), a Pinpoint v5 "
+                           "experiment file, a Pinpoint text export or an xyz track");
     bundleButton.setTooltip ("Localizer bundle directory (ibleatools scripts/export_localizer_bundle.py)");
     localize.onClick = [this] { node.requestLocalization(); };
     reset.onClick = [this] { node.resetLocalization(); };
@@ -55,13 +66,37 @@ void LocalizationPanel::resized()
 
 void LocalizationPanel::choosePlan()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Planned trajectory (ephysatlas-plan/1)", juce::File(), "*.json");
+    chooser = std::make_unique<juce::FileChooser> ("Planned trajectory (ephysatlas plan, Pinpoint file or xyz track)", juce::File(), "*");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
                           {
                               const auto f = fc.getResult();
-                              if (f.existsAsFile())
-                                  node.setLocalizationPlannedTrajectoryFile (f.getFullPathName());
+                              if (! f.existsAsFile())
+                                  return;
+                              const auto path = f.getFullPathName();
+                              const auto names = Realtime::pinpointProbeNames (path.toStdString());
+                              if (names.size() < 2)
+                              {
+                                  node.setLocalizationPlannedTrajectoryFile (path, names.empty() ? juce::String() : juce::String (names.front()));
+                                  return;
+                              }
+                              // A Pinpoint experiment of several probes: pick one, ticking the displayed stream's.
+                              const auto stream = squash (node.getDisplayedStream());
+                              juce::PopupMenu menu;
+                              menu.addSectionHeader ("Probe of " + f.getFileName());
+                              for (size_t i = 0; i < names.size(); ++i)
+                              {
+                                  const auto name = squash (juce::String (names[i]));
+                                  menu.addItem (static_cast<int> (i) + 1, juce::String (names[i]), true, name.isNotEmpty() && stream.contains (name));
+                              }
+                              juce::Component::SafePointer<LocalizationPanel> safe (this);
+                              menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&planButton),
+                                                  [safe, path, names] (int result)
+                                                  {
+                                                      if (safe != nullptr && result > 0)
+                                                          safe->node.setLocalizationPlannedTrajectoryFile (
+                                                              path, juce::String (names[static_cast<size_t> (result - 1)]));
+                                                  });
                           });
 }
 
@@ -80,7 +115,10 @@ void LocalizationPanel::chooseBundle()
 void LocalizationPanel::timerCallback()
 {
     const auto plan = node.getLocalizationPlannedTrajectoryFile();
-    planLabel.setText (plan.isEmpty() ? juce::String ("no plan loaded") : juce::File (plan).getFileName(), juce::dontSendNotification);
+    const auto probe = node.getLocalizationPlannedTrajectoryProbe();
+    planLabel.setText (plan.isEmpty() ? juce::String ("no plan loaded")
+                                      : juce::File (plan).getFileName() + (probe.isEmpty() ? juce::String() : " (" + probe + ")"),
+                       juce::dontSendNotification);
     const auto bundle = node.getLocalizationBundleDirectory();
     bundleLabel.setText (bundle.isEmpty() ? juce::String ("default bundle") : juce::File (bundle).getFileName(), juce::dontSendNotification);
     status.setText (node.getLocalizationStatus(), juce::dontSendNotification);

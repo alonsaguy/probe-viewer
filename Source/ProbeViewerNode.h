@@ -87,12 +87,13 @@ public:
     String handleConfigMessage (const String& msg) override;
 
     /** Real-time probe localization (Localization/): the localizer bundle directory (empty: the
-        default one) and the planned trajectory file (ephysatlas plan JSON, Pinpoint export or
-        xyz trajectory) */
+        default one) and the planned trajectory file (ephysatlas plan JSON, Pinpoint file or xyz
+        trajectory), with the probe to read from a Pinpoint v5 experiment of several probes */
     void setLocalizationBundleDirectory (const String& directory);
     String getLocalizationBundleDirectory() const;
-    void setLocalizationPlannedTrajectoryFile (const String& filename);
+    void setLocalizationPlannedTrajectoryFile (const String& filename, const String& probe = {});
     String getLocalizationPlannedTrajectoryFile() const;
+    String getLocalizationPlannedTrajectoryProbe() const;
 
     /** Starts localizing the displayed probe: AP + LF snippets are captured back to back from now
         on, and each one updates the estimate */

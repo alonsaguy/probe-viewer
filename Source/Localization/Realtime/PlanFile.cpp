@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <sstream>
 
@@ -105,6 +106,74 @@ std::vector<PlanPoint> parseXyz (const std::string& text)
     return points;
 }
 
+// A Pinpoint v5 experiment file (AllenNeuralDynamics/pinpoint).
+bool isPinpointV5 (const Json& doc)
+{
+    return doc.type == Json::Type::Object && doc.has ("probes") && doc.has ("probeInterfaceProbes") && doc.has ("atlas");
+}
+
+// Planned channel positions (m, IBL-Allen, top first) of one probe of a Pinpoint v5 experiment.
+// Pinpoint keeps the tip in atlas ASR mm (AP, DV, ML from the atlas origin) and the rotation as
+// [roll, yaw, pitch] (rad; Babylon RotationYawPitchRoll), under which probe-local +z, up the
+// shank from the tip, is (cos yaw cos pitch, -sin pitch, sin yaw cos pitch) in ASR. A contact
+// sits its probeinterface y above the bottom of the probe contour, the tip. The allen_mouse atlas
+// is the CCF, read from the IBL bregma; the qiu2018_mouse (MRI) atlas is read from its own bregma
+// and scaled to the CCF as iblatlas' MRITorontoAtlas (ML 0.952, AP 1.031, DV 0.885).
+std::vector<PlanPoint> pinpointV5Channels (const Json& doc, const Json& probe, int nChannels)
+{
+    const std::string atlas = doc["atlas"]["name"].str();
+    std::vector<double> bregmaMm; // ASR
+    PlanPoint scale { 1.0, 1.0, 1.0 }; // ML, AP, DV
+    if (atlas.rfind ("allen_mouse", 0) == 0)
+        bregmaMm = { 5.400, 0.332, 5.739 };
+    else if (atlas.rfind ("qiu2018_mouse", 0) == 0)
+    {
+        const Json& manifest = doc["atlas"]["manifest"];
+        bregmaMm = (manifest.has ("bregma") && manifest["bregma"].type == Json::Type::Array ? manifest["bregma"] : doc["referenceCoordinate"]).numbers();
+        scale = { 0.952, 1.031, 0.885 };
+    }
+    else
+        throw std::runtime_error ("its atlas is " + atlas + ": plan in the allen_mouse or qiu2018_mouse atlas");
+    if (bregmaMm.size() != 3)
+        throw std::runtime_error ("no bregma for the " + atlas + " atlas");
+
+    const Json& definition = doc["probeInterfaceProbes"][probe["probeInterfaceIdentifier"].str()];
+    if (definition.has ("annotations") && definition["annotations"].has ("model_name"))
+    {
+        const std::string model = definition["annotations"]["model_name"].str();
+        if (model.rfind ("NP1", 0) != 0)
+            throw std::runtime_error (probe["name"].str() + " is a " + model + " probe, the localizer needs a Neuropixels 1.0");
+    }
+    const std::string units = definition.has ("si_units") ? definition["si_units"].str() : "um";
+    const double toMm = units == "m" ? 1000.0 : units == "mm" ? 1.0 : 1e-3;
+    double tipY = std::numeric_limits<double>::infinity();
+    for (const auto& p : definition["probe_planar_contour"].items)
+        tipY = std::min (tipY, p[1].num());
+    const auto& contacts = definition["contact_positions"].items;
+    if (static_cast<int> (contacts.size()) < nChannels || ! std::isfinite (tipY))
+        throw std::runtime_error (probe["name"].str() + " has " + std::to_string (contacts.size()) + " contacts, the recording "
+                                  + std::to_string (nChannels) + " channels");
+
+    const auto tip = probe["tipPosition"].numbers();
+    const auto rotation = probe["rotation"].numbers();
+    if (tip.size() != 3 || rotation.size() != 3)
+        throw std::runtime_error ("bad tipPosition or rotation for " + probe["name"].str());
+    const double yaw = rotation[1], pitch = rotation[2];
+    const PlanPoint up { std::cos (yaw) * std::cos (pitch), -std::sin (pitch), std::sin (yaw) * std::cos (pitch) };
+
+    std::vector<PlanPoint> rows (static_cast<size_t> (nChannels));
+    for (int r = 0; r < nChannels; ++r)
+    {
+        const int channel = nChannels - 1 - r;
+        const double height = (contacts[static_cast<size_t> (channel)][1].num() - tipY) * toMm;
+        PlanPoint d {};
+        for (size_t k = 0; k < 3; ++k)
+            d[k] = tip[k] + height * up[k] - bregmaMm[k];
+        rows[static_cast<size_t> (r)] = { d[2] / scale[0] * 1e-3, -d[0] / scale[1] * 1e-3, -d[1] / scale[2] * 1e-3 };
+    }
+    return rows;
+}
+
 // Channel c of a Neuropixels 1.0 probe sits 20 (c / 2) + 20 µm up the track from the tip.
 std::vector<PlanPoint> np1Channels (const PlanPoint& entryUm, const PlanPoint& tipUm, int nChannels)
 {
@@ -145,8 +214,28 @@ bool loadPlanJson (const std::string& path, std::vector<PlanPoint>& plannedM, st
     }
 }
 
+std::vector<std::string> pinpointProbeNames (const std::string& path)
+{
+    std::vector<std::string> names;
+    try
+    {
+        const std::string text = readText (path);
+        if (text.find ("\"probeInterfaceProbes\"") == std::string::npos)
+            return names;
+        const Json doc = Json::parse (text);
+        if (isPinpointV5 (doc))
+            for (const auto& probe : doc["probes"].items)
+                names.push_back (probe["name"].str());
+    }
+    catch (const std::exception&)
+    {
+        names.clear();
+    }
+    return names;
+}
+
 bool loadPlanFile (const std::string& path, int nChannels, std::vector<PlanPoint>& plannedM,
-                   std::string& source, std::string& error)
+                   std::string& source, std::string& error, const std::string& probeName)
 {
     std::string text;
     try
@@ -169,6 +258,41 @@ bool loadPlanFile (const std::string& path, int nChannels, std::vector<PlanPoint
         }
         source = "ephysatlas plan";
         return true;
+    }
+    if (text.find ("\"probeInterfaceProbes\"") != std::string::npos)
+    {
+        try
+        {
+            const Json doc = Json::parse (text);
+            if (isPinpointV5 (doc))
+            {
+                const auto& probes = doc["probes"].items;
+                const Json* chosen = nullptr;
+                std::string names;
+                for (const auto& probe : probes)
+                {
+                    const std::string& name = probe["name"].str();
+                    names += (names.empty() ? "" : ", ") + name;
+                    if (probeName.empty() ? probes.size() == 1 : name == probeName)
+                        chosen = &probe;
+                }
+                if (chosen == nullptr)
+                {
+                    error = probes.empty() ? path + " has no probes"
+                          : probeName.empty() ? path + " has " + std::to_string (probes.size()) + " probes (" + names + "): choose one with Plan..."
+                                              : path + " has no probe " + probeName + " (" + names + ")";
+                    return false;
+                }
+                plannedM = pinpointV5Channels (doc, *chosen, nChannels);
+                source = "Pinpoint " + (doc.has ("version") ? doc["version"].str() : std::string ("v5")) + ", " + (*chosen)["name"].str();
+                return true;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            error = path + " (Pinpoint v5): " + e.what();
+            return false;
+        }
     }
     const std::string lowered = lower (text);
     PlanPoint entry {}, tip {};

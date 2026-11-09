@@ -7,7 +7,8 @@ namespace ProbeViewer { class ProbeViewerNode; }
 namespace ProbeViewer::Localization
 {
 // Editor controls of the real-time localization: start (continuous snippets), reset, the planned
-// trajectory (ephysatlas-plan/1 JSON) and the localizer bundle directory, and the status.
+// trajectory (a plan file, and the probe of a Pinpoint experiment of several) and the localizer
+// bundle directory, and the status.
 class LocalizationPanel : public juce::Component, private juce::Timer
 {
 public:

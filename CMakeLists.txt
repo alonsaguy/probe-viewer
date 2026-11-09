@@ -106,7 +106,8 @@ option(PROBE_VIEWER_BUILD_SELFTEST "Build probe-viewer-localizer-selftest" OFF)
 if(PROBE_VIEWER_BUILD_SELFTEST)
 	add_executable(probe-viewer-localizer-selftest
 		${CMAKE_CURRENT_SOURCE_DIR}/Tools/LocalizerSelfTest.cpp
-		${SOURCE_PATH}/Localization/Realtime/EphysOnlyLocalizer.cpp)
+		${SOURCE_PATH}/Localization/Realtime/EphysOnlyLocalizer.cpp
+		${SOURCE_PATH}/Localization/Realtime/PlanFile.cpp)
 	set_property(TARGET probe-viewer-localizer-selftest PROPERTY CXX_STANDARD 17)
 	if(MSVC)
 		target_compile_options(probe-viewer-localizer-selftest PRIVATE /O2)

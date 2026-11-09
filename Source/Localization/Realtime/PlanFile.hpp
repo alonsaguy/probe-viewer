@@ -17,7 +17,10 @@ bool loadPlanJson (const std::string& path, std::vector<PlanPoint>& plannedM, st
 
 // Any supported plan file, with nChannels channels of a Neuropixels 1.0 probe:
 // - ephysatlas-plan/1 JSON, used as is (its channel count must be nChannels);
-// - a Pinpoint export: entry AP, ML, DV (from bregma), insertion depth, theta (pitch from
+// - a Pinpoint v5 experiment file (Pinpoint's JSON export): probeName picks one of its probes
+//   (it may be empty when the file has a single probe); the channels are placed at the
+//   probe's contact positions; allen_mouse and qiu2018_mouse atlases;
+// - a Pinpoint text export: entry AP, ML, DV (from bregma), insertion depth, theta (pitch from
 //   horizontal) and phi (yaw, 0 = anterior), in µm or mm; the tip is depth along that axis;
 // - a trajectory text file: at least two "x y z" lines (µm or mm, IBL x ML, y AP, z DV), the
 //   deepest point taken as the tip.
@@ -26,5 +29,8 @@ bool loadPlanJson (const std::string& path, std::vector<PlanPoint>& plannedM, st
 // trajectory make the JSON with ephysatlas.realtime.plan.plan_from_trajectory instead.
 // source receives a description of what was read.
 bool loadPlanFile (const std::string& path, int nChannels, std::vector<PlanPoint>& plannedM,
-                   std::string& source, std::string& error);
+                   std::string& source, std::string& error, const std::string& probeName = {});
+
+// The probe names of a Pinpoint v5 experiment file, in file order; empty for any other file.
+std::vector<std::string> pinpointProbeNames (const std::string& path);
 } // namespace ProbeViewer::Localization::Realtime

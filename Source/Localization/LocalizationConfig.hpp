@@ -36,9 +36,11 @@ struct LocalizationConfig
     // cor_ratio on every AP sample (1) or a deterministic subsample.
     int corRatioSampleStride = 1;
 
-    // The planned trajectory: an ephysatlas-plan/1 JSON file, a Pinpoint export or an xyz
-    // trajectory (see Realtime/PlanFile.hpp).
+    // The planned trajectory: an ephysatlas-plan/1 JSON file, a Pinpoint v5 experiment, a
+    // Pinpoint text export or an xyz trajectory (see Realtime/PlanFile.hpp), and the probe to
+    // read from a Pinpoint v5 experiment with several probes.
     juce::String initialTrajectoryFile;
+    juce::String initialTrajectoryProbe;
 
     RealtimeLocalizationConfig realtime;
 };

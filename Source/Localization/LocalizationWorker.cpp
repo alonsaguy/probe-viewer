@@ -191,22 +191,25 @@ bool LocalizationWorker::prepareRealtime (const LocalizationConfig& config, int 
         planFile.clear();
         snippetCount.store (0);
     }
-    if (config.initialTrajectoryFile != planFile || static_cast<int> (plan.size()) != nChannels)
+    if (config.initialTrajectoryFile != planFile || config.initialTrajectoryProbe != planProbe
+        || static_cast<int> (plan.size()) != nChannels)
     {
         if (config.initialTrajectoryFile.isEmpty())
         {
-            error = "load the planned trajectory (Plan...: ephysatlas plan JSON, Pinpoint export or xyz trajectory)";
+            error = "load the planned trajectory (Plan...: ephysatlas plan JSON, Pinpoint file or xyz trajectory)";
             return false;
         }
         std::string err, source;
         std::vector<Realtime::V3> p;
-        if (! Realtime::loadPlanFile (config.initialTrajectoryFile.toStdString(), nChannels, p, source, err))
+        if (! Realtime::loadPlanFile (config.initialTrajectoryFile.toStdString(), nChannels, p, source, err,
+                                      config.initialTrajectoryProbe.toStdString()))
         {
             error = juce::String (err);
             return false;
         }
         plan = std::move (p);
         planFile = config.initialTrajectoryFile;
+        planProbe = config.initialTrajectoryProbe;
         planSource = juce::String (source);
         realtime->setPlan (plan);
     }

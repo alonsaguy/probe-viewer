@@ -38,14 +38,15 @@ The method is the ephys-only localizer of the [IBL ephys atlas](https://github.c
 - A Neuropixels 1.0 probe (384 channels, bank 0) with its AP (30 kHz) and LFP (2.5 kHz) streams, from the Neuropixels plugin or a recording played back with the File Reader.
 - The localizer bundle (~40 MB, the model's predictions on the atlas): download `probe-viewer-localizer-2026_W45.zip` from the [releases page](https://github.com/alonsaguy/probe-viewer/releases) and unzip it.
 - The planned trajectory of the insertion, in one of these formats:
+  - a [Pinpoint](https://pinpoint.allenneuraldynamics.org) v5 experiment file (the JSON Pinpoint exports), planned in the `qiu2018_mouse` or `allen_mouse` atlas; when it holds several probes, **Plan...** asks which one;
   - an `ephysatlas-plan/1` JSON file, made with `ephysatlas.realtime.plan` in ibleatools (`plan_from_trajectory` for IBL-convention coordinates: entry point, depth, theta, phi);
-  - a Pinpoint export (entry AP, ML, DV relative to bregma, insertion depth, theta, phi; µm or mm);
+  - a text file with labelled entry AP, ML, DV (relative to bregma), insertion depth, theta and phi (µm or mm);
   - a text file with at least two `x y z` points of the track (IBL coordinates: ML, AP, DV from bregma; µm or mm), the deepest one being the tip.
 
 **Usage**
 
 1. In the plugin editor, click **Bundle...** and choose the unzipped bundle folder (or set the `PROBE_VIEWER_LOCALIZER_BUNDLE` environment variable to it).
-2. Click **Plan...** and choose the planned trajectory file.
+2. Click **Plan...** and choose the planned trajectory file. For a Pinpoint experiment with several probes, pick the probe in the menu that opens (the one whose name matches the displayed stream, e.g. `Probe A` for `ProbeA-AP`, is ticked).
 3. Select the probe's AP or LFP stream as the displayed stream, start acquisition and click **Localize**. The status line shows the snippets as they are collected and localized; **Reset** forgets them (e.g. after moving the probe).
 
 Processing a snippet takes 7-10 s on a 22-core PC; snippets are taken back to back whenever the previous one is done, so the estimate updates every 12-15 s. It is about as good after the first snippet as after five minutes.
@@ -63,10 +64,11 @@ The estimate is closer to the histology than the plan for 76% of the insertions.
 
 - Neuropixels 1.0 only, one probe at a time.
 - The search starts from the plan: plans off by up to ~0.25 mm or 10° cost nothing, but a plan 1 mm or more off is only partly corrected.
-- For Pinpoint and xyz files the channels are placed along the planned track as given, with no Needles-frame correction; for IBL (Needles-convention) coordinates make the plan JSON with `plan_from_trajectory`.
+- Pinpoint v5 plans in the `qiu2018_mouse` (MRI) atlas are mapped to the Allen CCF with the scaling of the IBL `MRITorontoAtlas` (ML 0.952, AP 1.031, DV 0.885 about bregma), an affine approximation of the MRI-to-CCF registration. The channels sit at the probe's contact positions (bank 0).
+- For the two text formats the channels are placed along the planned track as given, with no Needles-frame correction; for IBL (Needles-convention) coordinates make the plan JSON with `plan_from_trajectory`.
 - Validated on recordings played back from disk; it has not yet been tested during a live experiment.
 
-A self-test checks the C++ localizer against the Python one on the example stored in the bundle: configure with `-DPROBE_VIEWER_BUILD_SELFTEST=ON` and run `probe-viewer-localizer-selftest <bundle folder>`.
+A self-test checks the C++ localizer against the Python one on the example stored in the bundle: configure with `-DPROBE_VIEWER_BUILD_SELFTEST=ON` and run `probe-viewer-localizer-selftest <bundle folder>`. The same tool checks a plan file: `probe-viewer-localizer-selftest <bundle folder> --plan <file> ["Probe A"]` prints the regions of the planned channels, top of the probe first.
 
 ## Building from source
 

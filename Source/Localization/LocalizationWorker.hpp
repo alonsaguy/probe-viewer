@@ -46,7 +46,7 @@ private:
     // Real-time localizer state (worker thread only).
     std::unique_ptr<Realtime::LocalizerBundle> bundle;
     std::unique_ptr<Realtime::RealtimeEngine> realtime;
-    juce::String bundleDirectory, planFile, planSource;
+    juce::String bundleDirectory, planFile, planProbe, planSource;
     std::vector<Realtime::V3> plan;
 };
 }
